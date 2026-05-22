@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         EasyXL
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  EasyXL - Unified IXL Solver with configurable AI providers
+// @version      2.4
+// @description  EasyXL - Unified IXL Solver with vision support
 // @author       You
 // @match        *://*.ixl.com/*
 // @grant        GM_xmlhttpRequest
@@ -10,6 +10,7 @@
 // @grant        GM_getResourceText
 // @require      https://cdn.jsdelivr.net/npm/marked/marked.min.js
 // @require      https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js
+// @require      https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js
 // @resource     KATEX_CSS https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css
 // @connect      api.openai.com
 // @connect      api.anthropic.com
@@ -44,9 +45,9 @@
         openai: {
             label: 'OpenAI',
             kind: 'openai',
-            defaultModel: 'llama-3.3-70b-versatile',
+            defaultModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
             defaultBaseUrl: 'https://api.groq.com/openai/v1/chat/completions',
-            models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gpt-4o', 'gpt-4o-mini'],
+            models: ['meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gpt-4o', 'gpt-4o-mini'],
             apiKeyPlaceholder: 'Enter Groq or OpenAI API Key',
             baseUrlPlaceholder: 'https://api.groq.com/openai/v1/chat/completions',
             notesPlaceholder: 'Add Custom Instructions. e.g. Only output the final answer...'
@@ -99,80 +100,42 @@
         return;
     }
 
-    function deepClone(value) {
-        return JSON.parse(JSON.stringify(value));
-    }
+    function deepClone(value) { return JSON.parse(JSON.stringify(value)); }
 
     function createDefaultProviderSettings(providerId) {
         const provider = PROVIDERS[providerId];
-        return {
-            apiKey: '',
-            model: provider.defaultModel,
-            baseUrl: provider.defaultBaseUrl,
-            notes: ''
-        };
+        return { apiKey: '', model: provider.defaultModel, baseUrl: provider.defaultBaseUrl, notes: '' };
     }
 
     function createDefaultSettings() {
         const providers = {};
-        Object.keys(PROVIDERS).forEach((providerId) => {
-            providers[providerId] = createDefaultProviderSettings(providerId);
-        });
-        return {
-            selectedProvider: 'openai',
-            providers
-        };
+        Object.keys(PROVIDERS).forEach((providerId) => { providers[providerId] = createDefaultProviderSettings(providerId); });
+        return { selectedProvider: 'openai', providers };
     }
 
     function pickInitialProvider(providers) {
         const providerIds = ['openai', 'anthropic', 'google', 'deepseek', 'kouri'];
         for (const providerId of providerIds) {
-            if (providers[providerId] && providers[providerId].apiKey) {
-                return providerId;
-            }
+            if (providers[providerId] && providers[providerId].apiKey) return providerId;
         }
         return 'openai';
     }
 
     function buildLegacySettings() {
         const settings = createDefaultSettings();
-        settings.providers.openai = {
-            apiKey: localStorage.getItem('easyxl_openai_api_key') || '',
-            model: localStorage.getItem('easyxl_openai_model') || PROVIDERS.openai.defaultModel,
-            baseUrl: PROVIDERS.openai.defaultBaseUrl,
-            notes: localStorage.getItem('easyxl_openai_notes') || ''
-        };
-        settings.providers.google = {
-            apiKey: localStorage.getItem('easyxl_gemini_api_key') || '',
-            model: localStorage.getItem('easyxl_gemini_model') || PROVIDERS.google.defaultModel,
-            baseUrl: PROVIDERS.google.defaultBaseUrl,
-            notes: localStorage.getItem('easyxl_gemini_notes') || ''
-        };
-        settings.providers.deepseek = {
-            apiKey: localStorage.getItem('easyxl_deepseek_api_key') || '',
-            model: localStorage.getItem('easyxl_deepseek_model') || PROVIDERS.deepseek.defaultModel,
-            baseUrl: PROVIDERS.deepseek.defaultBaseUrl,
-            notes: localStorage.getItem('easyxl_deepseek_notes') || ''
-        };
-        settings.providers.kouri = {
-            apiKey: localStorage.getItem('easyxl_kouri_api_key') || '',
-            model: localStorage.getItem('easyxl_kouri_model') || PROVIDERS.kouri.defaultModel,
-            baseUrl: PROVIDERS.kouri.defaultBaseUrl,
-            notes: localStorage.getItem('easyxl_kouri_notes') || ''
-        };
+        settings.providers.openai = { apiKey: localStorage.getItem('easyxl_openai_api_key') || '', model: localStorage.getItem('easyxl_openai_model') || PROVIDERS.openai.defaultModel, baseUrl: PROVIDERS.openai.defaultBaseUrl, notes: localStorage.getItem('easyxl_openai_notes') || '' };
+        settings.providers.google = { apiKey: localStorage.getItem('easyxl_gemini_api_key') || '', model: localStorage.getItem('easyxl_gemini_model') || PROVIDERS.google.defaultModel, baseUrl: PROVIDERS.google.defaultBaseUrl, notes: localStorage.getItem('easyxl_gemini_notes') || '' };
+        settings.providers.deepseek = { apiKey: localStorage.getItem('easyxl_deepseek_api_key') || '', model: localStorage.getItem('easyxl_deepseek_model') || PROVIDERS.deepseek.defaultModel, baseUrl: PROVIDERS.deepseek.defaultBaseUrl, notes: localStorage.getItem('easyxl_deepseek_notes') || '' };
+        settings.providers.kouri = { apiKey: localStorage.getItem('easyxl_kouri_api_key') || '', model: localStorage.getItem('easyxl_kouri_model') || PROVIDERS.kouri.defaultModel, baseUrl: PROVIDERS.kouri.defaultBaseUrl, notes: localStorage.getItem('easyxl_kouri_notes') || '' };
         settings.selectedProvider = pickInitialProvider(settings.providers);
         return settings;
     }
 
     function mergeSettings(rawSettings) {
         const merged = createDefaultSettings();
-        if (!rawSettings || typeof rawSettings !== 'object') {
-            return merged;
-        }
+        if (!rawSettings || typeof rawSettings !== 'object') return merged;
         const selectedProvider = rawSettings.selectedProvider;
-        if (selectedProvider && PROVIDERS[selectedProvider]) {
-            merged.selectedProvider = selectedProvider;
-        }
+        if (selectedProvider && PROVIDERS[selectedProvider]) merged.selectedProvider = selectedProvider;
         const incomingProviders = rawSettings.providers || {};
         Object.keys(PROVIDERS).forEach((providerId) => {
             const incoming = incomingProviders[providerId] || {};
@@ -206,133 +169,304 @@
     }
 
     let settings = loadSettings();
-
-    function saveSettings() {
-        localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-    }
-
-    function getProviderConfig(providerId = settings.selectedProvider) {
-        return settings.providers[providerId];
-    }
-
-    function getCurrentProvider() {
-        return PROVIDERS[settings.selectedProvider];
-    }
+    function saveSettings() { localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings)); }
+    function getProviderConfig(providerId = settings.selectedProvider) { return settings.providers[providerId]; }
+    function getCurrentProvider() { return PROVIDERS[settings.selectedProvider]; }
 
     function escapeHtml(text) {
-        return String(text)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+        return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    function normalizeUrl(url) {
-        return String(url || '').trim().replace(/\/+$/, '');
-    }
+    function normalizeUrl(url) { return String(url || '').trim().replace(/\/+$/, ''); }
 
     function extractApiErrorMessage(responseText) {
         try {
             const parsed = JSON.parse(responseText);
             return parsed.error?.message || parsed.message || parsed.error?.type || responseText;
+        } catch (error) { return responseText; }
+    }
+
+    async function captureSection(section) {
+        const canvas = await html2canvas(section, {
+            useCORS: true,
+            allowTaint: true,
+            scrollX: 0,
+            scrollY: 0,
+            windowWidth: document.documentElement.scrollWidth,
+            windowHeight: section.scrollHeight,
+            height: section.scrollHeight,
+            width: section.scrollWidth,
+            scale: 1
+        });
+        return canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    }
+
+    function formatResult(rawText) {
+        if (!rawText) return '';
+        const answerMatch = rawText.match(/<answer>([\s\S]*?)<\/answer>/i);
+        const answer = answerMatch ? answerMatch[1].trim() : null;
+        let explanation = rawText.replace(/<answer>[\s\S]*?<\/answer>/gi, '').trim();
+        explanation = explanation.replace(/\n{3,}/g, '\n\n').trim();
+
+        let html = '';
+
+        if (answer) {
+            html += `
+                <div style="
+                    background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+                    border: 2px solid #16a34a;
+                    border-radius: 12px;
+                    padding: 14px 16px;
+                    margin-bottom: 10px;
+                    text-align: center;
+                ">
+                    <div style="font-size: 11px; font-weight: 700; color: #15803d; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">✓ Answer</div>
+                    <div style="font-size: 26px; font-weight: 800; color: #14532d; letter-spacing: 0.5px;">${escapeHtml(answer)}</div>
+                </div>
+            `;
+        } else {
+            // No answer tag found — show raw text cleanly
+            html += `
+                <div style="
+                    background: rgba(241,245,249,0.9);
+                    border: 1px solid rgba(148,163,184,0.3);
+                    border-radius: 10px;
+                    padding: 12px 14px;
+                    font-size: 14px;
+                    line-height: 1.7;
+                    color: #1e293b;
+                ">${renderMarkdownWithMath(rawText)}</div>
+            `;
+        }
+
+        if (explanation) {
+            html += `
+                <div style="
+                    background: rgba(241,245,249,0.7);
+                    border: 1px solid rgba(148,163,184,0.25);
+                    border-radius: 10px;
+                    padding: 10px 12px;
+                ">
+                    <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Why</div>
+                    <div style="font-size: 13px; line-height: 1.65; color: #334155;">${renderMarkdownWithMath(explanation)}</div>
+                </div>
+            `;
+        }
+
+        return html;
+    }
+
+    function renderMarkdownWithMath(text) {
+        if (!text) return '';
+        const mathBlocks = [];
+        let processedText = text;
+        processedText = processedText.replace(/\\\[([\s\S]*?)\\\]/g, (match, value) => { mathBlocks.push({ type: 'block', text: value }); return `%%%MATH_BLOCK_${mathBlocks.length - 1}%%%`; });
+        processedText = processedText.replace(/\$\$([\s\S]*?)\$\$/g, (match, value) => { mathBlocks.push({ type: 'block', text: value }); return `%%%MATH_BLOCK_${mathBlocks.length - 1}%%%`; });
+        processedText = processedText.replace(/\\\(([\s\S]*?)\\\)/g, (match, value) => { mathBlocks.push({ type: 'inline', text: value }); return `%%%MATH_INLINE_${mathBlocks.length - 1}%%%`; });
+        processedText = processedText.replace(/(^|[^\\])\$([^\$]+?)\$/g, (match, prefix, value) => { mathBlocks.push({ type: 'inline', text: value }); return `${prefix}%%%MATH_INLINE_${mathBlocks.length - 1}%%%`; });
+        let html = typeof marked !== 'undefined' ? marked.parse(processedText) : processedText.replace(/\n/g, '<br>');
+        if (typeof katex !== 'undefined') {
+            html = html.replace(/%%%MATH_BLOCK_(\d+)%%%/g, (match, index) => { try { return katex.renderToString(mathBlocks[index].text, { displayMode: true, throwOnError: false }); } catch (e) { return `\\[${mathBlocks[index].text}\\]`; } });
+            html = html.replace(/%%%MATH_INLINE_(\d+)%%%/g, (match, index) => { try { return katex.renderToString(mathBlocks[index].text, { displayMode: false, throwOnError: false }); } catch (e) { return `\\(${mathBlocks[index].text}\\)`; } });
+        }
+        return html;
+    }
+
+    function setResult(content, isError = false, isStatus = false) {
+        if (isError) {
+            resultArea.innerHTML = `<div style="background:rgba(254,226,226,0.9);border:1px solid rgba(248,113,113,0.4);border-radius:10px;padding:10px 12px;color:#991b1b;font-size:13px;line-height:1.5;">${escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
+            return;
+        }
+        if (isStatus) {
+            resultArea.innerHTML = `<div style="color:#64748b;font-size:13px;text-align:center;padding:20px 0;">${content}</div>`;
+            return;
+        }
+        resultArea.innerHTML = formatResult(content);
+    }
+
+    function setButtonIdle() {
+        parseBtn.innerText = 'Parse and Solve';
+        parseBtn.disabled = false;
+        parseBtn.style.background = 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)';
+        parseBtn.style.boxShadow = '0 10px 24px rgba(37, 99, 235, 0.22)';
+    }
+
+    function setButtonBusy(msg = 'Solving...') {
+        parseBtn.innerText = msg;
+        parseBtn.disabled = true;
+        parseBtn.style.background = 'linear-gradient(135deg, #94a3b8 0%, #64748b 100%)';
+        parseBtn.style.boxShadow = 'none';
+        parseBtn.style.transform = 'none';
+        parseBtn.style.filter = 'none';
+    }
+
+    function findQuestionSection() {
+        for (const selector of QUESTION_SELECTORS) {
+            const section = document.querySelector(selector);
+            if (section) return section;
+        }
+        return null;
+    }
+
+    // ── UPDATED PROMPT: answer first, explanation optional and short ──────────
+    function buildImagePrompt(notes) {
+        const systemPrompt = `You are an expert math and science solver. You will be given a screenshot of an IXL question.
+
+YOUR MOST IMPORTANT JOB: Give the final answer inside <answer>...</answer> tags. This is required every time.
+
+Rules:
+- ALWAYS put the answer in <answer>...</answer> tags
+- Keep any explanation to 1-2 short sentences MAX
+- The answer should be just the value, not a sentence
+- If it is multiple choice, just give the correct option
+
+Example output:
+<answer>-3</answer>
+The graph approaches y = -3 as x goes to negative infinity.
+
+Another example:
+<answer>x = 5</answer>
+Divide both sides by 2 to isolate x.`;
+
+        let userPrompt = 'Solve the question in this screenshot. Remember to put the answer in <answer>...</answer> tags.';
+        if (notes && notes.trim()) userPrompt += `\n\nExtra instructions: ${notes.trim()}`;
+        return { systemPrompt, userPrompt };
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function validateConfig(providerId) {
+        const provider = PROVIDERS[providerId];
+        const config = getProviderConfig(providerId);
+        if (!config.apiKey.trim()) return `${provider.label} API Key cannot be empty.`;
+        if (!config.model.trim()) return `${provider.label} Model cannot be empty.`;
+        if (!config.baseUrl.trim()) return `${provider.label} Base URL cannot be empty.`;
+        try { new URL(config.baseUrl.trim()); } catch (e) { return `${provider.label} Base URL format is invalid.`; }
+        return '';
+    }
+
+    function sendRequest(url, headers, payload) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({ method: 'POST', url, headers, data: JSON.stringify(payload), onload: resolve, onerror: () => reject(new Error('network_error')) });
+        });
+    }
+
+    async function requestOpenAICompatibleWithImage(providerId, config, systemPrompt, userPrompt, base64Image) {
+        const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` };
+        const payload = {
+            model: config.model,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: [{ type: 'text', text: userPrompt }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }] }
+            ],
+            temperature: 0.0
+        };
+        let response = await sendRequest(config.baseUrl, headers, payload);
+        if (response.status < 200 || response.status >= 300) throw new Error(extractApiErrorMessage(response.responseText));
+        const data = JSON.parse(response.responseText);
+        return data.choices?.[0]?.message?.content?.trim?.() || response.responseText;
+    }
+
+    async function requestGoogleWithImage(config, systemPrompt, userPrompt, base64Image) {
+        const baseUrl = normalizeUrl(config.baseUrl);
+        const url = `${baseUrl}/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+        const payload = {
+            contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }, { inline_data: { mime_type: 'image/jpeg', data: base64Image } }] }],
+            generationConfig: { temperature: 0.0 }
+        };
+        const response = await sendRequest(url, { 'Content-Type': 'application/json' }, payload);
+        if (response.status < 200 || response.status >= 300) throw new Error(extractApiErrorMessage(response.responseText));
+        const data = JSON.parse(response.responseText);
+        return data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('\n').trim() || response.responseText;
+    }
+
+    async function requestAnthropicWithImage(config, systemPrompt, userPrompt, base64Image) {
+        const payload = {
+            model: config.model, max_tokens: 1024, temperature: 0.0, system: systemPrompt,
+            messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64Image } }, { type: 'text', text: userPrompt }] }]
+        };
+        const response = await sendRequest(config.baseUrl, { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, payload);
+        if (response.status < 200 || response.status >= 300) throw new Error(extractApiErrorMessage(response.responseText));
+        const data = JSON.parse(response.responseText);
+        return Array.isArray(data.content) ? data.content.filter(i => i.type === 'text').map(i => i.text || '').join('\n').trim() : response.responseText;
+    }
+
+    async function requestByProviderWithImage(providerId, config, systemPrompt, userPrompt, base64Image) {
+        if (providerId === 'google') return requestGoogleWithImage(config, systemPrompt, userPrompt, base64Image);
+        if (providerId === 'anthropic') return requestAnthropicWithImage(config, systemPrompt, userPrompt, base64Image);
+        return requestOpenAICompatibleWithImage(providerId, config, systemPrompt, userPrompt, base64Image);
+    }
+
+    async function solveQuestion() {
+        if (typeof GM_xmlhttpRequest === 'undefined') {
+            setResult('GM_xmlhttpRequest is not available. Please run the script in Tampermonkey.', true);
+            return;
+        }
+        const providerId = settings.selectedProvider;
+        const provider = PROVIDERS[providerId];
+        const config = deepClone(getProviderConfig(providerId));
+        const validationMessage = validateConfig(providerId);
+        if (validationMessage) {
+            setResult(validationMessage, true);
+            openSettings(`${validationMessage} Please correct the settings and try again.`);
+            return;
+        }
+        const section = findQuestionSection();
+        if (!section) {
+            setResult('No question found. Please make sure you are on an IXL practice problem.', true);
+            return;
+        }
+        clearSettingsMessage();
+        setButtonBusy('📸 Taking screenshot...');
+        setResult('📸 Taking screenshot...', false, true);
+        let base64Image;
+        try {
+            base64Image = await captureSection(section);
+        } catch (err) {
+            setResult('Screenshot failed: ' + err.message, true);
+            setButtonIdle();
+            return;
+        }
+        setButtonBusy('🤖 Solving...');
+        setResult('🤖 Asking AI...', false, true);
+        try {
+            const { systemPrompt, userPrompt } = buildImagePrompt(config.notes || '');
+            const text = await requestByProviderWithImage(providerId, config, systemPrompt, userPrompt, base64Image);
+            setResult(text);
         } catch (error) {
-            return responseText;
+            const message = `${provider.label} request failed: ${error.message || 'Unknown error'}. Please check API Key, model, and base URL.`;
+            setResult(message, true);
+            openSettings(message);
+        } finally {
+            setButtonIdle();
         }
     }
 
-    // ── NEW: strip HTML down to clean question text ──────────────────────────
-    function extractQuestionText(section) {
-        // Clone so we don't modify the real page
-        const clone = section.cloneNode(true);
-
-        // Remove elements that are never part of the question
-        const removeSelectors = [
-            'script', 'style', 'noscript', 'svg', 'iframe',
-            'button', 'input', 'select', 'textarea',
-            '[aria-hidden="true"]',
-            '.sr-only', '.visually-hidden',
-            'nav', 'header', 'footer'
-        ];
-        removeSelectors.forEach(sel => {
-            clone.querySelectorAll(sel).forEach(el => el.remove());
-        });
-
-        // Get plain text, collapse whitespace
-        const raw = clone.innerText || clone.textContent || '';
-        return raw.replace(/\s+/g, ' ').trim();
-    }
-    // ────────────────────────────────────────────────────────────────────────
-
+    // ── UI BUILD ─────────────────────────────────────────────────────────────
     const ui = document.createElement('div');
     ui.id = UI_ID;
-    ui.style.position = 'fixed';
-    ui.style.bottom = '20px';
-    ui.style.right = '20px';
-    ui.style.width = '380px';
-    ui.style.background = 'linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.58) 100%)';
-    ui.style.border = '1px solid rgba(255, 255, 255, 0.45)';
-    ui.style.borderRadius = '16px';
-    ui.style.boxShadow = '0 18px 55px rgba(2, 6, 23, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.40)';
-    ui.style.backdropFilter = 'blur(18px) saturate(180%)';
-    ui.style.webkitBackdropFilter = 'blur(18px) saturate(180%)';
-    ui.style.zIndex = '999999';
-    ui.style.fontFamily = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, 'Noto Sans', 'Helvetica Neue', sans-serif";
-    ui.style.boxSizing = 'border-box';
-    ui.style.padding = '14px';
-    ui.style.display = 'flex';
-    ui.style.flexDirection = 'column';
-    ui.style.gap = '10px';
-    ui.style.color = '#0f172a';
-    ui.style.overflow = 'hidden';
+    ui.style.cssText = `position:fixed;bottom:20px;right:20px;width:380px;background:linear-gradient(180deg,rgba(255,255,255,0.72) 0%,rgba(255,255,255,0.58) 100%);border:1px solid rgba(255,255,255,0.45);border-radius:16px;box-shadow:0 18px 55px rgba(2,6,23,0.18),inset 0 1px 0 rgba(255,255,255,0.40);backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);z-index:999999;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;box-sizing:border-box;padding:14px;display:flex;flex-direction:column;gap:10px;color:#0f172a;overflow:hidden;`;
 
     const header = document.createElement('div');
-    header.style.display = 'flex';
-    header.style.justifyContent = 'space-between';
-    header.style.alignItems = 'center';
-    header.style.paddingBottom = '10px';
-    header.style.borderBottom = '1px solid rgba(148, 163, 184, 0.25)';
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid rgba(148,163,184,0.25);cursor:grab;';
 
     const titleWrap = document.createElement('div');
-    titleWrap.style.display = 'flex';
-    titleWrap.style.alignItems = 'center';
-    titleWrap.style.gap = '10px';
+    titleWrap.style.cssText = 'display:flex;align-items:center;gap:10px;';
 
     const title = document.createElement('div');
     title.innerText = 'EasyXL';
-    title.style.margin = '0';
-    title.style.fontSize = '14px';
-    title.style.fontWeight = '700';
-    title.style.letterSpacing = '0.2px';
+    title.style.cssText = 'font-size:14px;font-weight:700;letter-spacing:0.2px;';
 
     const badge = document.createElement('span');
-    badge.style.fontSize = '11px';
-    badge.style.fontWeight = '700';
-    badge.style.padding = '3px 8px';
-    badge.style.borderRadius = '999px';
-    badge.style.background = 'rgba(37, 99, 235, 0.10)';
-    badge.style.color = '#1d4ed8';
-    badge.style.border = '1px solid rgba(37, 99, 235, 0.18)';
+    badge.style.cssText = 'font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:rgba(37,99,235,0.10);color:#1d4ed8;border:1px solid rgba(37,99,235,0.18);';
 
     const actionWrap = document.createElement('div');
-    actionWrap.style.display = 'flex';
-    actionWrap.style.alignItems = 'center';
-    actionWrap.style.gap = '8px';
+    actionWrap.style.cssText = 'display:flex;align-items:center;gap:8px;';
 
     const settingsButton = document.createElement('button');
     settingsButton.type = 'button';
     settingsButton.innerText = '⚙';
     settingsButton.title = 'Settings';
-    settingsButton.style.width = '34px';
-    settingsButton.style.height = '34px';
-    settingsButton.style.borderRadius = '999px';
-    settingsButton.style.border = '1px solid rgba(148, 163, 184, 0.30)';
-    settingsButton.style.background = 'rgba(255, 255, 255, 0.55)';
-    settingsButton.style.cursor = 'pointer';
-    settingsButton.style.fontSize = '16px';
-    settingsButton.style.fontWeight = '700';
-    settingsButton.style.color = '#0f172a';
-    settingsButton.style.boxShadow = '0 8px 18px rgba(15, 23, 42, 0.08)';
+    settingsButton.style.cssText = 'width:34px;height:34px;border-radius:999px;border:1px solid rgba(148,163,184,0.30);background:rgba(255,255,255,0.55);cursor:pointer;font-size:16px;font-weight:700;color:#0f172a;';
 
     titleWrap.appendChild(title);
     titleWrap.appendChild(badge);
@@ -342,36 +476,18 @@
     ui.appendChild(header);
 
     function applyFieldStyle(el) {
-        el.style.width = '100%';
-        el.style.padding = '10px 10px';
-        el.style.border = '1px solid rgba(255, 255, 255, 0.55)';
-        el.style.borderRadius = '12px';
-        el.style.background = 'rgba(255, 255, 255, 0.55)';
-        el.style.color = '#0f172a';
-        el.style.outline = 'none';
-        el.style.boxSizing = 'border-box';
-        el.style.fontSize = '13px';
+        el.style.cssText += 'width:100%;padding:10px;border:1px solid rgba(148,163,184,0.45);border-radius:12px;background:rgba(255,255,255,0.55);color:#0f172a;outline:none;box-sizing:border-box;font-size:13px;';
     }
 
     function addFocusRing(el) {
-        el.addEventListener('focus', () => {
-            el.style.borderColor = 'rgba(37, 99, 235, 0.65)';
-            el.style.boxShadow = '0 0 0 4px rgba(37, 99, 235, 0.16)';
-        });
-        el.addEventListener('blur', () => {
-            el.style.borderColor = 'rgba(148, 163, 184, 0.45)';
-            el.style.boxShadow = 'none';
-        });
+        el.addEventListener('focus', () => { el.style.borderColor = 'rgba(37,99,235,0.65)'; el.style.boxShadow = '0 0 0 4px rgba(37,99,235,0.16)'; });
+        el.addEventListener('blur', () => { el.style.borderColor = 'rgba(148,163,184,0.45)'; el.style.boxShadow = 'none'; });
     }
 
     function createLabel(text) {
         const label = document.createElement('label');
         label.innerText = text;
-        label.style.display = 'block';
-        label.style.fontSize = '12px';
-        label.style.fontWeight = '600';
-        label.style.color = '#334155';
-        label.style.marginBottom = '5px';
+        label.style.cssText = 'display:block;font-size:12px;font-weight:600;color:#334155;margin-bottom:5px;';
         return label;
     }
 
@@ -379,110 +495,50 @@
     ui.appendChild(notesLabel);
 
     const notesInput = document.createElement('textarea');
-    notesInput.style.height = '66px';
+    notesInput.style.height = '56px';
     notesInput.style.resize = 'vertical';
     applyFieldStyle(notesInput);
     addFocusRing(notesInput);
-    notesInput.addEventListener('input', () => {
-        getProviderConfig().notes = notesInput.value;
-        saveSettings();
-    });
+    notesInput.addEventListener('input', () => { getProviderConfig().notes = notesInput.value; saveSettings(); });
     ui.appendChild(notesInput);
 
     const parseBtn = document.createElement('button');
     parseBtn.type = 'button';
     parseBtn.innerText = 'Parse and Solve';
-    parseBtn.style.padding = '10px 12px';
-    parseBtn.style.border = '1px solid rgba(30, 64, 175, 0.20)';
-    parseBtn.style.borderRadius = '12px';
-    parseBtn.style.cursor = 'pointer';
-    parseBtn.style.fontWeight = '700';
-    parseBtn.style.letterSpacing = '0.2px';
-    parseBtn.style.color = '#ffffff';
-    parseBtn.style.background = 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)';
-    parseBtn.style.boxShadow = '0 10px 24px rgba(37, 99, 235, 0.22)';
-    parseBtn.style.transition = 'transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease';
-    parseBtn.onmouseover = () => {
-        if (parseBtn.disabled) return;
-        parseBtn.style.filter = 'brightness(1.03)';
-        parseBtn.style.transform = 'translateY(-1px)';
-        parseBtn.style.boxShadow = '0 14px 30px rgba(37, 99, 235, 0.24)';
-    };
-    parseBtn.onmouseout = () => {
-        parseBtn.style.filter = 'none';
-        parseBtn.style.transform = 'none';
-        parseBtn.style.boxShadow = '0 10px 24px rgba(37, 99, 235, 0.22)';
-    };
+    parseBtn.style.cssText = 'padding:11px 12px;border:1px solid rgba(30,64,175,0.20);border-radius:12px;cursor:pointer;font-weight:700;font-size:14px;color:#fff;background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%);box-shadow:0 10px 24px rgba(37,99,235,0.22);transition:transform 0.12s ease,filter 0.12s ease;width:100%;';
+    parseBtn.onmouseover = () => { if (parseBtn.disabled) return; parseBtn.style.filter = 'brightness(1.05)'; parseBtn.style.transform = 'translateY(-1px)'; };
+    parseBtn.onmouseout = () => { parseBtn.style.filter = 'none'; parseBtn.style.transform = 'none'; };
     ui.appendChild(parseBtn);
 
     const resultArea = document.createElement('div');
-    resultArea.style.height = '180px';
-    resultArea.style.overflowY = 'auto';
-    resultArea.style.wordWrap = 'break-word';
-    resultArea.innerHTML = '<span style="color: #64748b;">Results will be displayed here...</span>';
-    resultArea.style.fontSize = '14px';
-    resultArea.style.lineHeight = '1.5';
-    resultArea.style.userSelect = 'text';
-    applyFieldStyle(resultArea);
+    resultArea.style.cssText = 'min-height:180px;max-height:320px;overflow-y:auto;word-wrap:break-word;font-size:13px;line-height:1.6;user-select:text;';
+    resultArea.innerHTML = '<div style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Results will appear here</div>';
     ui.appendChild(resultArea);
 
     const settingsOverlay = document.createElement('div');
-    settingsOverlay.style.position = 'absolute';
-    settingsOverlay.style.inset = '0';
-    settingsOverlay.style.background = 'rgba(15, 23, 42, 0.16)';
-    settingsOverlay.style.display = 'none';
-    settingsOverlay.style.alignItems = 'stretch';
-    settingsOverlay.style.justifyContent = 'flex-end';
-    settingsOverlay.style.zIndex = '2';
+    settingsOverlay.style.cssText = 'position:absolute;inset:0;background:rgba(15,23,42,0.16);display:none;align-items:stretch;justify-content:flex-end;z-index:2;';
 
     const settingsPanel = document.createElement('div');
-    settingsPanel.style.width = '100%';
-    settingsPanel.style.height = '100%';
-    settingsPanel.style.background = 'linear-gradient(180deg, rgba(248, 250, 252, 0.92) 0%, rgba(241, 245, 249, 0.88) 100%)';
-    settingsPanel.style.backdropFilter = 'blur(18px) saturate(180%)';
-    settingsPanel.style.webkitBackdropFilter = 'blur(18px) saturate(180%)';
-    settingsPanel.style.padding = '14px';
-    settingsPanel.style.boxSizing = 'border-box';
-    settingsPanel.style.display = 'flex';
-    settingsPanel.style.flexDirection = 'column';
-    settingsPanel.style.gap = '10px';
-    settingsPanel.style.overflowY = 'auto';
+    settingsPanel.style.cssText = 'width:100%;height:100%;background:linear-gradient(180deg,rgba(248,250,252,0.96) 0%,rgba(241,245,249,0.92) 100%);backdrop-filter:blur(18px);padding:14px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px;overflow-y:auto;';
 
     const settingsHeader = document.createElement('div');
-    settingsHeader.style.display = 'flex';
-    settingsHeader.style.justifyContent = 'space-between';
-    settingsHeader.style.alignItems = 'center';
+    settingsHeader.style.cssText = 'display:flex;justify-content:space-between;align-items:center;';
 
     const settingsTitle = document.createElement('div');
     settingsTitle.innerText = 'Settings';
-    settingsTitle.style.fontSize = '15px';
-    settingsTitle.style.fontWeight = '700';
-    settingsTitle.style.color = '#0f172a';
+    settingsTitle.style.cssText = 'font-size:15px;font-weight:700;color:#0f172a;';
 
     const settingsCloseBtn = document.createElement('button');
     settingsCloseBtn.type = 'button';
     settingsCloseBtn.innerText = '×';
-    settingsCloseBtn.title = 'Close Settings';
-    settingsCloseBtn.style.width = '34px';
-    settingsCloseBtn.style.height = '34px';
-    settingsCloseBtn.style.borderRadius = '999px';
-    settingsCloseBtn.style.border = '1px solid rgba(148, 163, 184, 0.30)';
-    settingsCloseBtn.style.background = 'rgba(255, 255, 255, 0.72)';
-    settingsCloseBtn.style.cursor = 'pointer';
-    settingsCloseBtn.style.fontSize = '20px';
-    settingsCloseBtn.style.lineHeight = '1';
-    settingsCloseBtn.style.color = '#0f172a';
+    settingsCloseBtn.style.cssText = 'width:34px;height:34px;border-radius:999px;border:1px solid rgba(148,163,184,0.30);background:rgba(255,255,255,0.72);cursor:pointer;font-size:20px;line-height:1;color:#0f172a;';
 
     settingsHeader.appendChild(settingsTitle);
     settingsHeader.appendChild(settingsCloseBtn);
     settingsPanel.appendChild(settingsHeader);
 
     const settingsMessage = document.createElement('div');
-    settingsMessage.style.display = 'none';
-    settingsMessage.style.padding = '10px 12px';
-    settingsMessage.style.borderRadius = '12px';
-    settingsMessage.style.fontSize = '12px';
-    settingsMessage.style.lineHeight = '1.45';
+    settingsMessage.style.cssText = 'display:none;padding:10px 12px;border-radius:12px;font-size:12px;line-height:1.45;';
     settingsPanel.appendChild(settingsMessage);
 
     const providerLabel = createLabel('Provider');
@@ -530,9 +586,7 @@
     settingsPanel.appendChild(customModelInput);
 
     const settingsHint = document.createElement('div');
-    settingsHint.style.fontSize = '12px';
-    settingsHint.style.lineHeight = '1.5';
-    settingsHint.style.color = '#475569';
+    settingsHint.style.cssText = 'font-size:12px;line-height:1.5;color:#475569;';
     settingsPanel.appendChild(settingsHint);
 
     settingsOverlay.appendChild(settingsPanel);
@@ -541,16 +595,13 @@
 
     function showSettingsMessage(message, isError = true) {
         settingsMessage.style.display = 'block';
-        settingsMessage.style.background = isError ? 'rgba(254, 226, 226, 0.92)' : 'rgba(219, 234, 254, 0.92)';
-        settingsMessage.style.border = isError ? '1px solid rgba(248, 113, 113, 0.35)' : '1px solid rgba(96, 165, 250, 0.35)';
+        settingsMessage.style.background = isError ? 'rgba(254,226,226,0.92)' : 'rgba(219,234,254,0.92)';
+        settingsMessage.style.border = isError ? '1px solid rgba(248,113,113,0.35)' : '1px solid rgba(96,165,250,0.35)';
         settingsMessage.style.color = isError ? '#991b1b' : '#1d4ed8';
         settingsMessage.innerText = message;
     }
 
-    function clearSettingsMessage() {
-        settingsMessage.style.display = 'none';
-        settingsMessage.innerText = '';
-    }
+    function clearSettingsMessage() { settingsMessage.style.display = 'none'; settingsMessage.innerText = ''; }
 
     function updateBadgeAndNotes() {
         const provider = getCurrentProvider();
@@ -596,410 +647,51 @@
         baseUrlInput.value = config.baseUrl || provider.defaultBaseUrl;
         customModelInput.placeholder = `Input Custom Model (${provider.label})`;
         renderModelSelect(providerId, config.model || provider.defaultModel);
-        settingsHint.innerText = `Current Provider: ${provider.label}. If requests fail, check API Key, model, and base URL.`;
+        settingsHint.innerText = `Provider: ${provider.label}. Make sure your model supports vision.`;
     }
 
     function openSettings(message) {
         renderSettingsPanel();
-        if (message) {
-            showSettingsMessage(message, true);
-        }
+        if (message) showSettingsMessage(message, true);
         settingsOverlay.style.display = 'flex';
     }
 
-    function closeSettings() {
-        settingsOverlay.style.display = 'none';
-    }
+    function closeSettings() { settingsOverlay.style.display = 'none'; }
 
-    function validateConfig(providerId) {
-        const provider = PROVIDERS[providerId];
-        const config = getProviderConfig(providerId);
-        if (!config.apiKey.trim()) {
-            return `${provider.label} API Key cannot be empty.`;
-        }
-        if (!config.model.trim()) {
-            return `${provider.label} Model cannot be empty.`;
-        }
-        if (!config.baseUrl.trim()) {
-            return `${provider.label} Base URL cannot be empty.`;
-        }
-        try {
-            new URL(config.baseUrl.trim());
-        } catch (error) {
-            return `${provider.label} Base URL format is invalid.`;
-        }
-        return '';
-    }
-
-    function renderMarkdownWithMath(text) {
-        if (!text) return '';
-        const mathBlocks = [];
-        let processedText = text;
-
-        processedText = processedText.replace(/\\\[([\s\S]*?)\\\]/g, (match, value) => {
-            mathBlocks.push({ type: 'block', text: value });
-            return `%%%MATH_BLOCK_${mathBlocks.length - 1}%%%`;
-        });
-        processedText = processedText.replace(/\$\$([\s\S]*?)\$\$/g, (match, value) => {
-            mathBlocks.push({ type: 'block', text: value });
-            return `%%%MATH_BLOCK_${mathBlocks.length - 1}%%%`;
-        });
-        processedText = processedText.replace(/\\\(([\s\S]*?)\\\)/g, (match, value) => {
-            mathBlocks.push({ type: 'inline', text: value });
-            return `%%%MATH_INLINE_${mathBlocks.length - 1}%%%`;
-        });
-        processedText = processedText.replace(/(^|[^\\])\$([^\$]+?)\$/g, (match, prefix, value) => {
-            mathBlocks.push({ type: 'inline', text: value });
-            return `${prefix}%%%MATH_INLINE_${mathBlocks.length - 1}%%%`;
-        });
-
-        let html = '';
-        if (typeof marked !== 'undefined') {
-            html = marked.parse(processedText);
-        } else {
-            html = processedText.replace(/\n/g, '<br>');
-        }
-
-        if (typeof katex !== 'undefined') {
-            html = html.replace(/%%%MATH_BLOCK_(\d+)%%%/g, (match, index) => {
-                const block = mathBlocks[index];
-                try {
-                    return katex.renderToString(block.text, { displayMode: true, throwOnError: false });
-                } catch (error) {
-                    return `\\[${block.text}\\]`;
-                }
-            });
-            html = html.replace(/%%%MATH_INLINE_(\d+)%%%/g, (match, index) => {
-                const block = mathBlocks[index];
-                try {
-                    return katex.renderToString(block.text, { displayMode: false, throwOnError: false });
-                } catch (error) {
-                    return `\\(${block.text}\\)`;
-                }
-            });
-        } else {
-            html = html.replace(/%%%MATH_BLOCK_(\d+)%%%/g, (match, index) => `\\[${mathBlocks[index].text}\\]`);
-            html = html.replace(/%%%MATH_INLINE_(\d+)%%%/g, (match, index) => `\\(${mathBlocks[index].text}\\)`);
-        }
-
-        return html;
-    }
-
-    function setResult(content, isError = false) {
-        if (isError) {
-            resultArea.innerHTML = `<span style="color: #ef4444; font-weight: 500;">${escapeHtml(content).replace(/\n/g, '<br>')}</span>`;
-            return;
-        }
-        resultArea.innerHTML = renderMarkdownWithMath(content);
-    }
-
-    function setButtonIdle() {
-        parseBtn.innerText = 'Parse and Solve';
-        parseBtn.disabled = false;
-        parseBtn.style.background = 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)';
-        parseBtn.style.boxShadow = '0 10px 24px rgba(37, 99, 235, 0.22)';
-    }
-
-    function setButtonBusy() {
-        parseBtn.innerText = 'Solving Math...';
-        parseBtn.disabled = true;
-        parseBtn.style.background = 'linear-gradient(135deg, #94a3b8 0%, #64748b 100%)';
-        parseBtn.style.boxShadow = 'none';
-        parseBtn.style.transform = 'none';
-        parseBtn.style.filter = 'none';
-    }
-
-    function findQuestionSection() {
-        for (const selector of QUESTION_SELECTORS) {
-            const section = document.querySelector(selector);
-            if (section) {
-                return section;
-            }
-        }
-        return null;
-    }
-
-    function buildPrompts(questionText, notes) {
-        const systemPrompt = 'You are an expert math solver. Your task is to: 1. Read the question text carefully and determine the exact math problem. 2. Solve the problem step-by-step. Follow standard order of operations. Write down your solving steps. 3. Format your final output: You MUST enclose your final, concise answer within <answer>...</answer> tags. For example: <answer>42</answer> or <answer>x = 5</answer>.';
-        let userPrompt = `--- QUESTION ---\n${questionText}\n--- END QUESTION ---`;
-        if (notes.trim()) {
-            userPrompt += `\n\n--- USER ADDITIONAL NOTES ---\n${notes.trim()}\n--- END USER ADDITIONAL NOTES ---`;
-        }
-        return { systemPrompt, userPrompt };
-    }
-
-    function extractAnswer(text) {
-        const match = String(text || '').match(/<answer>([\s\S]*?)<\/answer>/i);
-        return match ? match[1].trim() : String(text || '').trim();
-    }
-
-    function sendRequest(url, headers, payload) {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url,
-                headers,
-                data: JSON.stringify(payload),
-                onload: resolve,
-                onerror: () => reject(new Error('network_error'))
-            });
-        });
-    }
-
-    async function requestOpenAICompatible(providerId, config, systemPrompt, userPrompt) {
-        const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiKey}`
-        };
-        const payload = {
-            model: config.model,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt }
-            ],
-            temperature: 0.0
-        };
-        let response = await sendRequest(config.baseUrl, headers, payload);
-        if (providerId === 'deepseek' && response.status === 404 && normalizeUrl(config.baseUrl) === normalizeUrl(PROVIDERS.deepseek.defaultBaseUrl)) {
-            response = await sendRequest(PROVIDERS.deepseek.fallbackBaseUrl, headers, payload);
-        }
-        if (response.status < 200 || response.status >= 300) {
-            throw new Error(extractApiErrorMessage(response.responseText));
-        }
-        const data = JSON.parse(response.responseText);
-        return data.choices?.[0]?.message?.content?.trim?.() || response.responseText;
-    }
-
-    async function requestGoogle(config, systemPrompt, userPrompt) {
-        const baseUrl = normalizeUrl(config.baseUrl);
-        const url = `${baseUrl}/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
-        const payload = {
-            contents: [
-                {
-                    role: 'user',
-                    parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
-                }
-            ],
-            generationConfig: {
-                temperature: 0.0
-            }
-        };
-        const response = await sendRequest(url, { 'Content-Type': 'application/json' }, payload);
-        if (response.status < 200 || response.status >= 300) {
-            throw new Error(extractApiErrorMessage(response.responseText));
-        }
-        const data = JSON.parse(response.responseText);
-        const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n').trim();
-        return text || response.responseText;
-    }
-
-    async function requestAnthropic(config, systemPrompt, userPrompt) {
-        const payload = {
-            model: config.model,
-            max_tokens: 1024,
-            temperature: 0.0,
-            system: systemPrompt,
-            messages: [
-                {
-                    role: 'user',
-                    content: userPrompt
-                }
-            ]
-        };
-        const response = await sendRequest(config.baseUrl, {
-            'Content-Type': 'application/json',
-            'x-api-key': config.apiKey,
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true'
-        }, payload);
-        if (response.status < 200 || response.status >= 300) {
-            throw new Error(extractApiErrorMessage(response.responseText));
-        }
-        const data = JSON.parse(response.responseText);
-        const text = Array.isArray(data.content)
-            ? data.content.filter((item) => item.type === 'text').map((item) => item.text || '').join('\n').trim()
-            : '';
-        return text || response.responseText;
-    }
-
-    async function requestByProvider(providerId, config, systemPrompt, userPrompt) {
-        if (providerId === 'google') {
-            return requestGoogle(config, systemPrompt, userPrompt);
-        }
-        if (providerId === 'anthropic') {
-            return requestAnthropic(config, systemPrompt, userPrompt);
-        }
-        return requestOpenAICompatible(providerId, config, systemPrompt, userPrompt);
-    }
-
-    async function solveQuestion() {
-        if (typeof GM_xmlhttpRequest === 'undefined') {
-            const message = 'GM_xmlhttpRequest is not available. Please run the script in Tampermonkey.';
-            setResult(message, true);
-            openSettings(message);
-            return;
-        }
-
-        const providerId = settings.selectedProvider;
-        const provider = PROVIDERS[providerId];
-        const config = deepClone(getProviderConfig(providerId));
-        const validationMessage = validateConfig(providerId);
-        if (validationMessage) {
-            setResult(validationMessage, true);
-            openSettings(`${validationMessage} Please correct the settings and try again.`);
-            return;
-        }
-
-        const section = findQuestionSection();
-        if (!section) {
-            setResult('No question found. Please make sure you are on an IXL practice problem.', true);
-            return;
-        }
-
-        clearSettingsMessage();
-        setButtonBusy();
-        setResult('Sending request to the AI...');
-
-        try {
-            // Use clean text instead of raw HTML
-            const questionText = extractQuestionText(section);
-            const { systemPrompt, userPrompt } = buildPrompts(questionText, config.notes || '');
-            const text = await requestByProvider(providerId, config, systemPrompt, userPrompt);
-            const answer = extractAnswer(text);
-            setResult(answer || text);
-        } catch (error) {
-            const message = `${provider.label} request failed: ${error.message || 'Unknown error'}. Please check API Key, model, and base URL.`;
-            setResult(message, true);
-            openSettings(message);
-        } finally {
-            setButtonIdle();
-        }
-    }
-
-    providerSelect.addEventListener('change', () => {
-        settings.selectedProvider = providerSelect.value;
-        saveSettings();
-        clearSettingsMessage();
-        updateBadgeAndNotes();
-        renderSettingsPanel();
-    });
-
-    apiKeyInput.addEventListener('input', () => {
-        getProviderConfig(providerSelect.value).apiKey = apiKeyInput.value;
-        saveSettings();
-    });
-
-    baseUrlInput.addEventListener('input', () => {
-        getProviderConfig(providerSelect.value).baseUrl = baseUrlInput.value;
-        saveSettings();
-    });
-
+    providerSelect.addEventListener('change', () => { settings.selectedProvider = providerSelect.value; saveSettings(); clearSettingsMessage(); updateBadgeAndNotes(); renderSettingsPanel(); });
+    apiKeyInput.addEventListener('input', () => { getProviderConfig(providerSelect.value).apiKey = apiKeyInput.value; saveSettings(); });
+    baseUrlInput.addEventListener('input', () => { getProviderConfig(providerSelect.value).baseUrl = baseUrlInput.value; saveSettings(); });
     modelSelect.addEventListener('change', () => {
         const config = getProviderConfig(providerSelect.value);
-        if (modelSelect.value === CUSTOM_MODEL_VALUE) {
-            customModelInput.style.display = 'block';
-            config.model = customModelInput.value.trim() || config.model || PROVIDERS[providerSelect.value].defaultModel;
-        } else {
-            customModelInput.style.display = 'none';
-            config.model = modelSelect.value;
-        }
-        saveSettings();
-        renderSettingsPanel();
+        if (modelSelect.value === CUSTOM_MODEL_VALUE) { customModelInput.style.display = 'block'; config.model = customModelInput.value.trim() || config.model || PROVIDERS[providerSelect.value].defaultModel; }
+        else { customModelInput.style.display = 'none'; config.model = modelSelect.value; }
+        saveSettings(); renderSettingsPanel();
     });
-
-    customModelInput.addEventListener('input', () => {
-        if (modelSelect.value !== CUSTOM_MODEL_VALUE) return;
-        getProviderConfig(providerSelect.value).model = customModelInput.value.trim();
-        saveSettings();
-    });
-
-    settingsButton.addEventListener('click', () => {
-        clearSettingsMessage();
-        openSettings();
-    });
-
+    customModelInput.addEventListener('input', () => { if (modelSelect.value !== CUSTOM_MODEL_VALUE) return; getProviderConfig(providerSelect.value).model = customModelInput.value.trim(); saveSettings(); });
+    settingsButton.addEventListener('click', () => { clearSettingsMessage(); openSettings(); });
     settingsCloseBtn.addEventListener('click', closeSettings);
-
-    settingsOverlay.addEventListener('click', (event) => {
-        if (event.target === settingsOverlay) {
-            closeSettings();
-        }
-    });
-
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && settingsOverlay.style.display !== 'none') {
-            closeSettings();
-        }
-    });
-
+    settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) closeSettings(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsOverlay.style.display !== 'none') closeSettings(); });
     parseBtn.addEventListener('click', solveQuestion);
 
-    let isDragging = false;
-    let currentX = 0;
-    let currentY = 0;
-    let initialX = 0;
-    let initialY = 0;
-    let xOffset = 0;
-    let yOffset = 0;
-
-    header.style.cursor = 'grab';
-    header.addEventListener('mousedown', dragStart);
-    document.addEventListener('mouseup', dragEnd);
-    document.addEventListener('mousemove', drag);
-
-    function dragStart(event) {
-        initialX = event.clientX - xOffset;
-        initialY = event.clientY - yOffset;
-        if (event.target === header || event.target === title || event.target === badge || event.target === titleWrap) {
-            isDragging = true;
-            header.style.cursor = 'grabbing';
-        }
-    }
-
-    function dragEnd() {
-        initialX = currentX;
-        initialY = currentY;
-        isDragging = false;
-        header.style.cursor = 'grab';
-    }
-
-    function drag(event) {
-        if (!isDragging) return;
-        event.preventDefault();
-        currentX = event.clientX - initialX;
-        currentY = event.clientY - initialY;
-        xOffset = currentX;
-        yOffset = currentY;
+    let isDragging = false, currentX = 0, currentY = 0, initialX = 0, initialY = 0, xOffset = 0, yOffset = 0;
+    header.addEventListener('mousedown', (e) => {
+        initialX = e.clientX - xOffset; initialY = e.clientY - yOffset;
+        if (e.target === header || e.target === title || e.target === badge || e.target === titleWrap) { isDragging = true; header.style.cursor = 'grabbing'; }
+    });
+    document.addEventListener('mouseup', () => { initialX = currentX; initialY = currentY; isDragging = false; header.style.cursor = 'grab'; });
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return; e.preventDefault();
+        currentX = e.clientX - initialX; currentY = e.clientY - initialY;
+        xOffset = currentX; yOffset = currentY;
         ui.style.transform = `translate(${currentX}px, ${currentY}px)`;
-    }
-
-    let ctrlDown = false;
-    let ctrlUsedAsModifier = false;
-
-    document.addEventListener('keydown', (event) => {
-        if (event.code === 'ControlLeft' || event.code === 'ControlRight') {
-            if (!event.repeat) {
-                ctrlDown = true;
-                ctrlUsedAsModifier = false;
-            }
-            return;
-        }
-        if (ctrlDown) {
-            ctrlUsedAsModifier = true;
-        }
     });
 
-    document.addEventListener('keyup', (event) => {
-        if (event.code !== 'ControlLeft' && event.code !== 'ControlRight') return;
-        if (ctrlDown && !ctrlUsedAsModifier) {
-            ui.style.display = ui.style.display === 'none' ? 'flex' : 'none';
-        }
-        ctrlDown = false;
-        ctrlUsedAsModifier = false;
-    });
+    let ctrlDown = false, ctrlUsedAsModifier = false;
+    document.addEventListener('keydown', (e) => { if (e.code === 'ControlLeft' || e.code === 'ControlRight') { if (!e.repeat) { ctrlDown = true; ctrlUsedAsModifier = false; } return; } if (ctrlDown) ctrlUsedAsModifier = true; });
+    document.addEventListener('keyup', (e) => { if (e.code !== 'ControlLeft' && e.code !== 'ControlRight') return; if (ctrlDown && !ctrlUsedAsModifier) ui.style.display = ui.style.display === 'none' ? 'flex' : 'none'; ctrlDown = false; ctrlUsedAsModifier = false; });
 
     updateBadgeAndNotes();
     renderSettingsPanel();
-
     console.log('EasyXL unified userscript loaded successfully.');
 })();
