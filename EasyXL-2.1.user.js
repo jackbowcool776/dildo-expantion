@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EasyXL
 // @namespace    http://tampermonkey.net/
-// @version      2.4
+// @version      2.8
 // @description  EasyXL - Unified IXL Solver with vision support
 // @author       You
 // @match        *://*.ixl.com/*
@@ -50,7 +50,7 @@
             models: ['meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gpt-4o', 'gpt-4o-mini'],
             apiKeyPlaceholder: 'Enter Groq or OpenAI API Key',
             baseUrlPlaceholder: 'https://api.groq.com/openai/v1/chat/completions',
-            notesPlaceholder: 'Add Custom Instructions. e.g. Only output the final answer...'
+            notesPlaceholder: 'Extra instructions e.g. show steps...'
         },
         anthropic: {
             label: 'Anthropic',
@@ -60,7 +60,7 @@
             models: ['claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest'],
             apiKeyPlaceholder: 'Enter Anthropic API Key',
             baseUrlPlaceholder: 'https://api.anthropic.com/v1/messages',
-            notesPlaceholder: 'Add Custom Instructions. e.g. Only output the final answer...'
+            notesPlaceholder: 'Extra instructions e.g. show steps...'
         },
         google: {
             label: 'Google',
@@ -70,7 +70,7 @@
             models: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
             apiKeyPlaceholder: 'Enter Google AI API Key',
             baseUrlPlaceholder: 'https://generativelanguage.googleapis.com/v1beta/models',
-            notesPlaceholder: 'Add Custom Instructions. e.g. Only output the final answer...'
+            notesPlaceholder: 'Extra instructions e.g. show steps...'
         },
         deepseek: {
             label: 'DeepSeek',
@@ -81,7 +81,7 @@
             models: ['deepseek-chat', 'deepseek-reasoner'],
             apiKeyPlaceholder: 'Enter DeepSeek API Key',
             baseUrlPlaceholder: 'https://api.deepseek.com/chat/completions',
-            notesPlaceholder: 'Add Custom Instructions. e.g. Only output the final answer...'
+            notesPlaceholder: 'Extra instructions e.g. show steps...'
         },
         kouri: {
             label: 'Kouri',
@@ -91,7 +91,7 @@
             models: ['gpt-4o', 'deepseek-chat', 'claude-3-5-sonnet-latest', 'deepseek-v3', 'deepseek-v3.1', 'deepseek-v3.2', 'gpt-5', 'gpt-5-chat'],
             apiKeyPlaceholder: 'Enter Kouri API Key',
             baseUrlPlaceholder: 'https://api.kourichat.com/v1/chat/completions',
-            notesPlaceholder: 'Add Custom Instructions. e.g. Only output the final answer...'
+            notesPlaceholder: 'Extra instructions e.g. show steps...'
         }
     };
 
@@ -123,10 +123,10 @@
 
     function buildLegacySettings() {
         const settings = createDefaultSettings();
-        settings.providers.openai = { apiKey: localStorage.getItem('easyxl_openai_api_key') || '', model: localStorage.getItem('easyxl_openai_model') || PROVIDERS.openai.defaultModel, baseUrl: PROVIDERS.openai.defaultBaseUrl, notes: localStorage.getItem('easyxl_openai_notes') || '' };
-        settings.providers.google = { apiKey: localStorage.getItem('easyxl_gemini_api_key') || '', model: localStorage.getItem('easyxl_gemini_model') || PROVIDERS.google.defaultModel, baseUrl: PROVIDERS.google.defaultBaseUrl, notes: localStorage.getItem('easyxl_gemini_notes') || '' };
-        settings.providers.deepseek = { apiKey: localStorage.getItem('easyxl_deepseek_api_key') || '', model: localStorage.getItem('easyxl_deepseek_model') || PROVIDERS.deepseek.defaultModel, baseUrl: PROVIDERS.deepseek.defaultBaseUrl, notes: localStorage.getItem('easyxl_deepseek_notes') || '' };
-        settings.providers.kouri = { apiKey: localStorage.getItem('easyxl_kouri_api_key') || '', model: localStorage.getItem('easyxl_kouri_model') || PROVIDERS.kouri.defaultModel, baseUrl: PROVIDERS.kouri.defaultBaseUrl, notes: localStorage.getItem('easyxl_kouri_notes') || '' };
+        settings.providers.openai = { apiKey: localStorage.getItem('easyxl_openai_api_key') || '', model: localStorage.getItem('easyxl_openai_model') || PROVIDERS.openai.defaultModel, baseUrl: PROVIDERS.openai.defaultBaseUrl, notes: '' };
+        settings.providers.google = { apiKey: localStorage.getItem('easyxl_gemini_api_key') || '', model: localStorage.getItem('easyxl_gemini_model') || PROVIDERS.google.defaultModel, baseUrl: PROVIDERS.google.defaultBaseUrl, notes: '' };
+        settings.providers.deepseek = { apiKey: localStorage.getItem('easyxl_deepseek_api_key') || '', model: localStorage.getItem('easyxl_deepseek_model') || PROVIDERS.deepseek.defaultModel, baseUrl: PROVIDERS.deepseek.defaultBaseUrl, notes: '' };
+        settings.providers.kouri = { apiKey: localStorage.getItem('easyxl_kouri_api_key') || '', model: localStorage.getItem('easyxl_kouri_model') || PROVIDERS.kouri.defaultModel, baseUrl: PROVIDERS.kouri.defaultBaseUrl, notes: '' };
         settings.selectedProvider = pickInitialProvider(settings.providers);
         return settings;
     }
@@ -224,19 +224,6 @@
                     <div style="font-size: 26px; font-weight: 800; color: #14532d; letter-spacing: 0.5px;">${escapeHtml(answer)}</div>
                 </div>
             `;
-        } else {
-            // No answer tag found — show raw text cleanly
-            html += `
-                <div style="
-                    background: rgba(241,245,249,0.9);
-                    border: 1px solid rgba(148,163,184,0.3);
-                    border-radius: 10px;
-                    padding: 12px 14px;
-                    font-size: 14px;
-                    line-height: 1.7;
-                    color: #1e293b;
-                ">${renderMarkdownWithMath(rawText)}</div>
-            `;
         }
 
         if (explanation) {
@@ -251,6 +238,10 @@
                     <div style="font-size: 13px; line-height: 1.65; color: #334155;">${renderMarkdownWithMath(explanation)}</div>
                 </div>
             `;
+        }
+
+        if (!answer && !explanation) {
+            html = `<div style="background:rgba(241,245,249,0.9);border:1px solid rgba(148,163,184,0.3);border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.7;color:#1e293b;">${renderMarkdownWithMath(rawText)}</div>`;
         }
 
         return html;
@@ -285,7 +276,7 @@
     }
 
     function setButtonIdle() {
-        parseBtn.innerText = 'Parse and Solve';
+        parseBtn.innerText = 'Solve Question';
         parseBtn.disabled = false;
         parseBtn.style.background = 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)';
         parseBtn.style.boxShadow = '0 10px 24px rgba(37, 99, 235, 0.22)';
@@ -308,31 +299,23 @@
         return null;
     }
 
-    // ── UPDATED PROMPT: answer first, explanation optional and short ──────────
     function buildImagePrompt(notes) {
-        const systemPrompt = `You are an expert math and science solver. You will be given a screenshot of an IXL question.
+        const systemPrompt = `You are an expert IXL math and science solver. You will be given a screenshot of an IXL question.
 
-YOUR MOST IMPORTANT JOB: Give the final answer inside <answer>...</answer> tags. This is required every time.
+RULES:
+- Always put your final answer in <answer>...</answer> tags
+- After the answer tag, write 1-2 short sentences explaining why
+- Keep it simple and easy to understand
+- Just the value in the answer tag, no full sentences
 
-Rules:
-- ALWAYS put the answer in <answer>...</answer> tags
-- Keep any explanation to 1-2 short sentences MAX
-- The answer should be just the value, not a sentence
-- If it is multiple choice, just give the correct option
+Example:
+<answer>-8</answer>
+The dashed line is the asymptote at y = -8, so the limit approaches -8.`;
 
-Example output:
-<answer>-3</answer>
-The graph approaches y = -3 as x goes to negative infinity.
-
-Another example:
-<answer>x = 5</answer>
-Divide both sides by 2 to isolate x.`;
-
-        let userPrompt = 'Solve the question in this screenshot. Remember to put the answer in <answer>...</answer> tags.';
+        let userPrompt = 'Solve the question in this screenshot.';
         if (notes && notes.trim()) userPrompt += `\n\nExtra instructions: ${notes.trim()}`;
         return { systemPrompt, userPrompt };
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
     function validateConfig(providerId) {
         const provider = PROVIDERS[providerId];
@@ -441,10 +424,9 @@ Divide both sides by 2 to isolate x.`;
         }
     }
 
-    // ── UI BUILD ─────────────────────────────────────────────────────────────
     const ui = document.createElement('div');
     ui.id = UI_ID;
-    ui.style.cssText = `position:fixed;bottom:20px;right:20px;width:380px;background:linear-gradient(180deg,rgba(255,255,255,0.72) 0%,rgba(255,255,255,0.58) 100%);border:1px solid rgba(255,255,255,0.45);border-radius:16px;box-shadow:0 18px 55px rgba(2,6,23,0.18),inset 0 1px 0 rgba(255,255,255,0.40);backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);z-index:999999;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;box-sizing:border-box;padding:14px;display:flex;flex-direction:column;gap:10px;color:#0f172a;overflow:hidden;`;
+    ui.style.cssText = `position:fixed;bottom:20px;right:20px;width:360px;background:linear-gradient(180deg,rgba(255,255,255,0.72) 0%,rgba(255,255,255,0.58) 100%);border:1px solid rgba(255,255,255,0.45);border-radius:16px;box-shadow:0 18px 55px rgba(2,6,23,0.18),inset 0 1px 0 rgba(255,255,255,0.40);backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);z-index:999999;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;box-sizing:border-box;padding:14px;display:flex;flex-direction:column;gap:10px;color:#0f172a;overflow:hidden;`;
 
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid rgba(148,163,184,0.25);cursor:grab;';
@@ -491,11 +473,12 @@ Divide both sides by 2 to isolate x.`;
         return label;
     }
 
-    const notesLabel = createLabel('User Notes');
+    const notesLabel = createLabel('Extra Instructions (optional)');
     ui.appendChild(notesLabel);
 
     const notesInput = document.createElement('textarea');
-    notesInput.style.height = '56px';
+    notesInput.placeholder = 'e.g. show steps, round to 2 decimals...';
+    notesInput.style.height = '52px';
     notesInput.style.resize = 'vertical';
     applyFieldStyle(notesInput);
     addFocusRing(notesInput);
@@ -504,15 +487,15 @@ Divide both sides by 2 to isolate x.`;
 
     const parseBtn = document.createElement('button');
     parseBtn.type = 'button';
-    parseBtn.innerText = 'Parse and Solve';
+    parseBtn.innerText = 'Solve Question';
     parseBtn.style.cssText = 'padding:11px 12px;border:1px solid rgba(30,64,175,0.20);border-radius:12px;cursor:pointer;font-weight:700;font-size:14px;color:#fff;background:linear-gradient(135deg,#2563eb 0%,#7c3aed 100%);box-shadow:0 10px 24px rgba(37,99,235,0.22);transition:transform 0.12s ease,filter 0.12s ease;width:100%;';
     parseBtn.onmouseover = () => { if (parseBtn.disabled) return; parseBtn.style.filter = 'brightness(1.05)'; parseBtn.style.transform = 'translateY(-1px)'; };
     parseBtn.onmouseout = () => { parseBtn.style.filter = 'none'; parseBtn.style.transform = 'none'; };
     ui.appendChild(parseBtn);
 
     const resultArea = document.createElement('div');
-    resultArea.style.cssText = 'min-height:180px;max-height:320px;overflow-y:auto;word-wrap:break-word;font-size:13px;line-height:1.6;user-select:text;';
-    resultArea.innerHTML = '<div style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Results will appear here</div>';
+    resultArea.style.cssText = 'min-height:120px;max-height:280px;overflow-y:auto;word-wrap:break-word;font-size:13px;line-height:1.6;user-select:text;';
+    resultArea.innerHTML = '<div style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Press Solve to get the answer</div>';
     ui.appendChild(resultArea);
 
     const settingsOverlay = document.createElement('div');
@@ -607,7 +590,6 @@ Divide both sides by 2 to isolate x.`;
         const provider = getCurrentProvider();
         const config = getProviderConfig();
         badge.innerText = provider.label;
-        notesLabel.innerText = `User Notes (${provider.label})`;
         notesInput.placeholder = provider.notesPlaceholder;
         notesInput.value = config.notes || '';
     }
@@ -647,7 +629,7 @@ Divide both sides by 2 to isolate x.`;
         baseUrlInput.value = config.baseUrl || provider.defaultBaseUrl;
         customModelInput.placeholder = `Input Custom Model (${provider.label})`;
         renderModelSelect(providerId, config.model || provider.defaultModel);
-        settingsHint.innerText = `Provider: ${provider.label}. Make sure your model supports vision.`;
+        settingsHint.innerText = 'Your API key saves automatically. Make sure your model supports vision.';
     }
 
     function openSettings(message) {
